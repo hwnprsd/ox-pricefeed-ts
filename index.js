@@ -166,6 +166,9 @@ function setupSwapEventListener() {
 
 function formatNumber(num) {
   // Convert to string, limit decimal places to avoid big.js errors
+        if (!num) {
+                return num
+        }
   return parseFloat(num.toFixed(8));
 }
 
