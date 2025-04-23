@@ -148,12 +148,12 @@ async function storePrice(tokenA, tokenB, price, timestamp) {
 }
 
 async function setupEventListeners() {
-  contract.on('Swap', async (user, tokenIn, tokenOut, amountIn, amountOut, event) => {
-    const blockNumber = event.blockNumber;
-    lastProcessedBlock = blockNumber;
-    
-    await processSwapEvent(event);
-  });
+        contract.on('Swap', async (event) => {
+          const blockNumber = event.blockNumber;
+          lastProcessedBlock = blockNumber;
+          
+          await processSwapEvent(event);
+        });
 }
 
 async function startServer() {
