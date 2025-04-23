@@ -243,11 +243,11 @@ async function startServer() {
           )
           SELECT 
             s.time,
-            c.open,
-            c.high,
-            c.low,
-            c.close,
-            c.volume
+            coalesce(c.open, lag(c.close) OVER (ORDER BY s.time)) AS open,
+            coalesce(c.high, lag(c.close) OVER (ORDER BY s.time)) AS high,
+            coalesce(c.low,  lag(c.close) OVER (ORDER BY s.time)) AS low,
+            coalesce(c.close, lag(c.close) OVER (ORDER BY s.time)) AS close,
+            coalesce(c.volume, 0) AS volume
           FROM series s
           LEFT JOIN candles c ON s.time = c.time
           ORDER BY s.time;
