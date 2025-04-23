@@ -306,17 +306,27 @@ app.get('/history', async (req, res) => {
         if (timestamps.length === 0) {
           timestamps.push(parseInt(from), parseInt(to));
         }
+
+return res.json({
+  s: "ok",
+  t: [1745417700, 1745418700, 1745419700, 1745420700, 1745421700],
+  o: [100.0, 101.0, 102.0, 103.0, 104.0],
+  h: [105.0, 106.0, 107.0, 108.0, 109.0],
+  l: [95.0, 96.0, 97.0, 98.0, 99.0],
+  c: [102.0, 103.0, 104.0, 105.0, 106.0],
+  v: [1000, 1000, 1000, 1000, 1000]
+});
         
-        // Add a small artificial difference between OHLC values to force candle rendering
-        return res.json({
-          s: "ok",
-          t: timestamps,
-          o: timestamps.map(() => lastKnownPrice),
-          h: timestamps.map(() => lastKnownPrice * 10.0001), // Slightly higher
-          l: timestamps.map(() => lastKnownPrice * 0.9999), // Slightly lower
-          c: timestamps.map(() => lastKnownPrice * 10.00005), // Different from open
-          v: timestamps.map(() => 10) // More substantial volume
-        });
+        // // Add a small artificial difference between OHLC values to force candle rendering
+        // return res.json({
+        //   s: "ok",
+        //   t: timestamps,
+        //   o: timestamps.map(() => lastKnownPrice),
+        //   h: timestamps.map(() => lastKnownPrice * 10.0001), // Slightly higher
+        //   l: timestamps.map(() => lastKnownPrice * 0.9999), // Slightly lower
+        //   c: timestamps.map(() => lastKnownPrice * 10.00005), // Different from open
+        //   v: timestamps.map(() => 10) // More substantial volume
+        // });
       }
     }
     
