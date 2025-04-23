@@ -221,9 +221,12 @@ async function startServer() {
       }
     });
 
+// Replace your history endpoint with this improved version
 app.get('/history', async (req, res) => {
   try {
     const { symbol, resolution, from, to } = req.query;
+    
+    console.log(`History request - Symbol: ${symbol}, Resolution: ${resolution}, From: ${from}, To: ${to}`);
     
     // Check if there's any data for this symbol at all
     const dataCheck = await pgPool.query(
@@ -244,19 +247,20 @@ app.get('/history', async (req, res) => {
     );
 
     let timeGroup;
+    let intervalSeconds;
     switch(resolution) {
-      case '1': timeGroup = '1 minute'; break;
-      case '5': timeGroup = '5 minutes'; break;
-      case '15': timeGroup = '15 minutes'; break;
-      case '30': timeGroup = '30 minutes'; break;
-      case '60': timeGroup = '1 hour'; break;
-      case '240': timeGroup = '4 hours'; break;
-      case 'D': timeGroup = '1 day'; break;
-      case 'W': timeGroup = '1 week'; break;
-      default: timeGroup = '1 hour';
+      case '1': timeGroup = '1 minute'; intervalSeconds = 60; break;
+      case '5': timeGroup = '5 minutes'; intervalSeconds = 300; break;
+      case '15': timeGroup = '15 minutes'; intervalSeconds = 900; break;
+      case '30': timeGroup = '30 minutes'; intervalSeconds = 1800; break;
+      case '60': timeGroup = '1 hour'; intervalSeconds = 3600; break;
+      case '240': timeGroup = '4 hours'; intervalSeconds = 14400; break;
+      case 'D': timeGroup = '1 day'; intervalSeconds = 86400; break;
+      case 'W': timeGroup = '1 week'; intervalSeconds = 604800; break;
+      default: timeGroup = '1 hour'; intervalSeconds = 3600;
     }
     
-    // Query to get data for the requested period - SIMPLIFIED APPROACH
+    // Query to get data for the requested period
     const query = `
       SELECT 
         time_bucket($1, timestamp) AS time,
@@ -274,48 +278,44 @@ app.get('/history', async (req, res) => {
     `;
     
     const result = await pgPool.query(query, [timeGroup, symbol, from, to]);
+    console.log(`Query returned ${result.rows.length} rows`);
     
-    // No data in the requested time period, check if we have historical data
+    // No data in the requested time period
     if (result.rows.length === 0) {
       if (historicalCheck.rows.length === 0) {
+        console.log('No data available for the requested period and no historical data');
         return res.json({
           s: "no_data"
         });
       } else {
+        console.log('Using historical price for empty period');
         // We have historical data, use it for the missing periods
         const lastKnownPrice = parseFloat(historicalCheck.rows[0].price);
         
-        // Create timeframes based on the resolution
+        // Generate evenly spaced timestamps
+        let startTime = Math.floor(parseInt(from) / intervalSeconds) * intervalSeconds;
+        const endTime = Math.ceil(parseInt(to) / intervalSeconds) * intervalSeconds;
+        
         const timestamps = [];
-        let interval = 60; // Default 1 minute in seconds
-        
-        switch(resolution) {
-          case '1': interval = 60; break;
-          case '5': interval = 300; break;
-          case '15': interval = 900; break;
-          case '30': interval = 1800; break;
-          case '60': interval = 3600; break; 
-          case '240': interval = 14400; break;
-          case 'D': interval = 86400; break;
-          case 'W': interval = 604800; break;
+        while (startTime <= endTime) {
+          timestamps.push(startTime);
+          startTime += intervalSeconds;
         }
         
-        let currentTime = parseInt(from);
-        const endTime = parseInt(to);
-        
-        while (currentTime <= endTime) {
-          timestamps.push(currentTime);
-          currentTime += interval;
+        // Ensure we have at least a few data points
+        if (timestamps.length === 0) {
+          timestamps.push(parseInt(from), parseInt(to));
         }
         
+        // Add a small artificial difference between OHLC values to force candle rendering
         return res.json({
           s: "ok",
           t: timestamps,
           o: timestamps.map(() => lastKnownPrice),
-          h: timestamps.map(() => lastKnownPrice),
-          l: timestamps.map(() => lastKnownPrice),
-          c: timestamps.map(() => lastKnownPrice),
-          v: timestamps.map(() => 1) // Use 1 instead of 0.1 for volume
+          h: timestamps.map(() => lastKnownPrice * 1.0001), // Slightly higher
+          l: timestamps.map(() => lastKnownPrice * 0.9999), // Slightly lower
+          c: timestamps.map(() => lastKnownPrice * 1.00005), // Different from open
+          v: timestamps.map(() => 10) // More substantial volume
         });
       }
     }
@@ -328,18 +328,44 @@ app.get('/history', async (req, res) => {
     const c = [];
     const v = [];
     
-    // Ensure all values are proper numbers, not strings
+    // Process each row and ensure candle data is valid for rendering
     result.rows.forEach(row => {
-      // Convert timestamp to Unix timestamp (seconds)
       const timestamp = Math.floor(new Date(row.time).getTime() / 1000);
       
+      // Parse values and ensure they're proper numbers
+      let open = parseFloat(row.open);
+      let high = parseFloat(row.high);
+      let low = parseFloat(row.low);
+      let close = parseFloat(row.close);
+      let volume = Math.max(10, parseInt(row.volume)); // Minimum volume of 10
+      
+      // Ensure high is the highest value
+      high = Math.max(high, open, close);
+      
+      // Ensure low is the lowest value
+      low = Math.min(low, open, close);
+      
+      // Ensure candle body exists (open != close)
+      if (Math.abs(open - close) < 0.0000001) {
+        // Add a tiny difference if open and close are virtually identical
+        close = open * 1.0001;
+      }
+      
+      // Add a small artificial range if high and low are identical
+      if (Math.abs(high - low) < 0.0000001) {
+        high = Math.max(open, close) * 1.0001;
+        low = Math.min(open, close) * 0.9999;
+      }
+      
       t.push(timestamp);
-      o.push(parseFloat(row.open));
-      h.push(parseFloat(row.high));
-      l.push(parseFloat(row.low));
-      c.push(parseFloat(row.close));
-      v.push(Math.max(1, parseInt(row.volume))); // Use actual volume count or minimum 1
+      o.push(open);
+      h.push(high);
+      l.push(low);
+      c.push(close);
+      v.push(volume);
     });
+    
+    console.log(`Returning ${t.length} candles to TradingView`);
     
     res.json({
       s: "ok",
@@ -356,6 +382,27 @@ app.get('/history', async (req, res) => {
     res.status(500).json({ s: "error", errmsg: "Internal error" });
   }
 });
+
+// Also define this helper function to track and log what's happening
+function logChartData(data) {
+  console.log('Chart data debug:');
+  console.log(`Status: ${data.s}`);
+  if (data.t && data.t.length > 0) {
+    console.log(`Timestamps: ${data.t.length} entries`);
+    console.log(`First timestamp: ${new Date(data.t[0] * 1000).toISOString()}`);
+    console.log(`Last timestamp: ${new Date(data.t[data.t.length - 1] * 1000).toISOString()}`);
+    
+    if (data.o && data.o.length > 0) {
+      const sampleIndex = Math.min(2, data.o.length - 1);
+      console.log(`Sample candle at index ${sampleIndex}:`);
+      console.log(`  Open: ${data.o[sampleIndex]}`);
+      console.log(`  High: ${data.h[sampleIndex]}`);
+      console.log(`  Low: ${data.l[sampleIndex]}`);
+      console.log(`  Close: ${data.c[sampleIndex]}`);
+      console.log(`  Volume: ${data.v[sampleIndex]}`);
+    }
+  }
+}
     
         // app.get('/history', async (req, res) => {
         //   try {
