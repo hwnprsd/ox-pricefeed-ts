@@ -213,80 +213,164 @@ async function startServer() {
       }
     });
     
-    app.get('/history', async (req, res) => {
-      try {
-        const { symbol, resolution, from, to } = req.query;
-        
-        let timeGroup;
-        switch(resolution) {
-          case '1': timeGroup = '1 minute'; break;
-          case '5': timeGroup = '5 minutes'; break;
-          case '15': timeGroup = '15 minutes'; break;
-          case '30': timeGroup = '30 minutes'; break;
-          case '60': timeGroup = '1 hour'; break;
-          case '240': timeGroup = '4 hours'; break;
-          case 'D': timeGroup = '1 day'; break;
-          case 'W': timeGroup = '1 week'; break;
-          default: timeGroup = '1 hour';
-        }
-        
-        const query = `
-          WITH series AS (
-            SELECT generate_series(
-              date_trunc('minute', to_timestamp($3))::timestamp,
-              date_trunc('minute', to_timestamp($4))::timestamp,
-              $1::interval
-            ) AS time
-          ),
-          candles AS (
-            SELECT 
-              time_bucket($1, timestamp) AS time,
-              first(price, timestamp) AS open,
-              max(price) AS high,
-              min(price) AS low,
-              last(price, timestamp) AS close
-            FROM price_points
-            WHERE pair = $2
-              AND timestamp >= to_timestamp($3)
-              AND timestamp <= to_timestamp($4)
-            GROUP BY time
-          )
-          SELECT
-            s.time,
-            COALESCE(c.open, (SELECT close FROM candles WHERE close IS NOT NULL ORDER BY time DESC LIMIT 1)) AS open,
-            COALESCE(c.high, (SELECT close FROM candles WHERE close IS NOT NULL ORDER BY time DESC LIMIT 1)) AS high,
-            COALESCE(c.low, (SELECT close FROM candles WHERE close IS NOT NULL ORDER BY time DESC LIMIT 1)) AS low,
-            COALESCE(c.close, (SELECT close FROM candles WHERE close IS NOT NULL ORDER BY time DESC LIMIT 1)) AS close
-          FROM series s
-          LEFT JOIN candles c ON s.time = c.time
-          ORDER BY s.time;
-        `;
-        
-        const result = await pgPool.query(query, [timeGroup, symbol, from, to]);
-        
-        if (result.rows.length === 0) {
-          return res.json({
-            s: "no_data",
-            nextTime: null
-          });
-        }
-        
-        const candles = result.rows;
-        
-        res.json({
-          s: "ok",
-          t: candles.map(c => Math.floor(new Date(c.time).getTime() / 1000)),
-          o: candles.map(c => parseFloat(c.open)),
-          h: candles.map(c => parseFloat(c.high)),
-          l: candles.map(c => parseFloat(c.low)),
-          c: candles.map(c => parseFloat(c.close)),
-          v: candles.map(c => 0.1) // Minimal placeholder value for TradingView
+        app.get('/history', async (req, res) => {
+          try {
+            const { symbol, resolution, from, to } = req.query;
+            
+            // Check if there's any data for this symbol at all
+            const dataCheck = await pgPool.query(
+              'SELECT COUNT(*) FROM price_points WHERE pair = $1',
+              [symbol]
+            );
+
+            if (parseInt(dataCheck.rows[0].count) === 0) {
+              return res.json({
+                s: "no_data"
+              });
+            }
+
+            // Get the last known price before the requested period
+            const historicalCheck = await pgPool.query(
+              'SELECT price FROM price_points WHERE pair = $1 AND timestamp <= to_timestamp($2) ORDER BY timestamp DESC LIMIT 1',
+              [symbol, from]
+            );
+
+            let timeGroup;
+            switch(resolution) {
+              case '1': timeGroup = '1 minute'; break;
+              case '5': timeGroup = '5 minutes'; break;
+              case '15': timeGroup = '15 minutes'; break;
+              case '30': timeGroup = '30 minutes'; break;
+              case '60': timeGroup = '1 hour'; break;
+              case '240': timeGroup = '4 hours'; break;
+              case 'D': timeGroup = '1 day'; break;
+              case 'W': timeGroup = '1 week'; break;
+              default: timeGroup = '1 hour';
+            }
+            
+            // Query to get data for the requested period
+            const query = `
+              WITH series AS (
+                SELECT generate_series(
+                  date_trunc('minute', to_timestamp($3))::timestamp,
+                  date_trunc('minute', to_timestamp($4))::timestamp,
+                  $1::interval
+                ) AS time
+              ),
+              candles AS (
+                SELECT 
+                  time_bucket($1, timestamp) AS time,
+                  first(price, timestamp) AS open,
+                  max(price) AS high,
+                  min(price) AS low,
+                  last(price, timestamp) AS close
+                FROM price_points
+                WHERE pair = $2
+                  AND timestamp >= to_timestamp($3)
+                  AND timestamp <= to_timestamp($4)
+                GROUP BY time
+              )
+              SELECT 
+                s.time,
+                c.open,
+                c.high,
+                c.low,
+                c.close
+              FROM series s
+              LEFT JOIN candles c ON s.time = c.time
+              ORDER BY s.time;
+            `;
+            
+            const result = await pgPool.query(query, [timeGroup, symbol, from, to]);
+            
+            // No data in the requested time period, check if we have historical data
+            if (result.rows.length === 0 || result.rows.every(row => row.open === null)) {
+              if (historicalCheck.rows.length === 0) {
+                return res.json({
+                  s: "no_data"
+                });
+              } else {
+                // We have historical data, use it for the missing periods
+                const lastKnownPrice = parseFloat(historicalCheck.rows[0].price);
+                
+                // Create timeframes based on the resolution
+                const timestamps = [];
+                let interval = 60; // Default 1 minute in seconds
+                
+                switch(resolution) {
+                  case '1': interval = 60; break;
+                  case '5': interval = 300; break;
+                  case '15': interval = 900; break;
+                  case '30': interval = 1800; break;
+                  case '60': interval = 3600; break; 
+                  case '240': interval = 14400; break;
+                  case 'D': interval = 86400; break;
+                  case 'W': interval = 604800; break;
+                }
+                
+                let currentTime = Math.floor(parseInt(from) / interval) * interval;
+                const endTime = Math.ceil(parseInt(to) / interval) * interval;
+                
+                while (currentTime <= endTime) {
+                  timestamps.push(currentTime);
+                  currentTime += interval;
+                }
+                
+                return res.json({
+                  s: "ok",
+                  t: timestamps,
+                  o: timestamps.map(() => lastKnownPrice),
+                  h: timestamps.map(() => lastKnownPrice),
+                  l: timestamps.map(() => lastKnownPrice),
+                  c: timestamps.map(() => lastKnownPrice),
+                  v: timestamps.map(() => 0.1) // Minimal placeholder volume
+                });
+              }
+            }
+            
+            // Process the result when we have some data for the period
+            const lastKnownPrice = historicalCheck.rows.length > 0 
+              ? parseFloat(historicalCheck.rows[0].price) 
+              : null;
+            
+            // Fill in missing values with the last known price
+            let lastPrice = lastKnownPrice;
+            const candles = result.rows.map(row => {
+              if (row.close !== null) {
+                lastPrice = parseFloat(row.close);
+                return {
+                  time: row.time,
+                  open: parseFloat(row.open),
+                  high: parseFloat(row.high),
+                  low: parseFloat(row.low),
+                  close: parseFloat(row.close)
+                };
+              } else {
+                return {
+                  time: row.time,
+                  open: lastPrice,
+                  high: lastPrice,
+                  low: lastPrice,
+                  close: lastPrice
+                };
+              }
+            });
+            
+            res.json({
+              s: "ok",
+              t: candles.map(c => Math.floor(new Date(c.time).getTime() / 1000)),
+              o: candles.map(c => c.open),
+              h: candles.map(c => c.high),
+              l: candles.map(c => c.low),
+              c: candles.map(c => c.close),
+              v: candles.map(() => 0.1) // Minimal placeholder volume
+            });
+            
+          } catch (error) {
+            console.error('History error:', error);
+            res.status(500).json({ s: "error", errmsg: "Internal error" });
+          }
         });
-      } catch (error) {
-        console.error('History error:', error);
-        res.status(500).json({ s: "error", errmsg: "Internal error" });
-      }
-    });
     
     app.listen(port, () => {
       console.log(`Pricefeed server running on port ${port}`);
