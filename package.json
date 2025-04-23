@@ -2,7 +2,7 @@
   "name": "odx-pricefeed-server",
   "version": "1.0.0",
   "description": "TradingView compatible pricefeed server for OdxDex",
-  "main": "index.js",
+  "main": "index.ts",
   "scripts": {
     "start": "ts-node index.ts",
     "dev": "nodemon index.js"
