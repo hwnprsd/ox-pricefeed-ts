@@ -234,7 +234,7 @@ async function startServer() {
               max(price) AS high,
               min(price) AS low,
               last(price, timestamp) AS close,
-              count(*) AS volume
+              count(*)::numeric AS volume
             FROM price_points
             WHERE pair = $2
               AND timestamp >= to_timestamp($3)
@@ -247,7 +247,10 @@ async function startServer() {
             coalesce(c.high, lag(c.close) OVER (ORDER BY s.time)) AS high,
             coalesce(c.low,  lag(c.close) OVER (ORDER BY s.time)) AS low,
             coalesce(c.close, lag(c.close) OVER (ORDER BY s.time)) AS close,
-            coalesce(c.volume, 0) AS volume
+            CASE 
+              WHEN c.volume IS NULL AND c.close IS NOT NULL THEN 0.000001
+              ELSE coalesce(c.volume, 0)
+            END AS volume
           FROM series s
           LEFT JOIN candles c ON s.time = c.time
           ORDER BY s.time;
