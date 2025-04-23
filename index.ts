@@ -4,6 +4,7 @@ import { ethers } from "ethers";
 import { abi } from "./contract-abi";
 import cors from "cors";
 import dotenv from "dotenv";
+import { futimes } from "fs";
 
 // Load environment variables
 dotenv.config();
@@ -303,6 +304,31 @@ app.get("/search", async (req, res) => {
   const query = req.query.query as string;
   const limit = parseInt(req.query.limit as string) || 30;
 
+  let dbQ = "";
+
+  if (query.includes("/")) {
+    const [token1, token2] = query.split("/");
+    dbQ = `SELECT DISTINCT t1.symbol as base, t2.symbol as quote
+       FROM tokens t1
+       JOIN tokens t2 ON t1.address != t2.address
+       WHERE t1.symbol ILIKE $1 AND t2.symbol ILIKE $2
+       LIMIT $3`;
+    try {
+      const result = await db.query(dbQ, [`%${token1}%`, `%${token2}%`, limit]);
+      const symbols = result.rows.map((row: any) => ({
+        symbol: `${row.base}/${row.quote}`,
+        full_name: `${row.base}/${row.quote}`,
+        description: `${row.base}/${row.quote} pair`,
+        exchange: "ODX_DEX",
+        type: "crypto",
+      }));
+      return res.json(symbols);
+    } catch (error: any) {
+      console.error("Error in search endpoint:", error);
+      res.status(500).json({ s: "error", errmsg: "Internal server error" });
+    }
+  }
+
   try {
     const result = await db.query(
       `SELECT DISTINCT t1.symbol as base, t2.symbol as quote
@@ -317,11 +343,11 @@ app.get("/search", async (req, res) => {
       symbol: `${row.base}/${row.quote}`,
       full_name: `${row.base}/${row.quote}`,
       description: `${row.base}/${row.quote} pair`,
-      exchange: "DEX",
+      exchange: "ODX_DEX",
       type: "crypto",
     }));
 
-    res.json(symbols);
+    return res.json(symbols);
   } catch (error) {
     console.error("Error in search endpoint:", error);
     res.status(500).json({ s: "error", errmsg: "Internal server error" });
