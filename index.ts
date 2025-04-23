@@ -224,6 +224,7 @@ async function processSwapEvent(event: ethers.Event) {
 // Set up routes for TradingView UDF API
 
 // Config endpoint
+// @ts-ignore
 app.get("/config", (req, res) => {
   res.json({
     supported_resolutions: [
@@ -297,6 +298,7 @@ app.get("/symbols", async (req: any, res: any) => {
 });
 
 // Symbol search endpoint
+// @ts-ignore
 app.get("/search", async (req, res) => {
   const query = req.query.query as string;
   const limit = parseInt(req.query.limit as string) || 30;

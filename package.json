@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
     "@types/pg": "^8.11.13",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
