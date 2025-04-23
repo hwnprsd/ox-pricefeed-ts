@@ -74,18 +74,16 @@ async function backfillEvents(fromBlock, toBlock) {
 }
 
 async function processSwapEvent(event) {
-        console.log("Processing swap event")
   try {
     const { tokenIn, tokenOut, amountIn, amountOut } = event.args;
     const block = await event.getBlock();
     const timestamp = block.timestamp;
     
-    const poolHash = getPoolHash(tokenIn, tokenOut);
     const pool = await getPoolInfo(tokenIn, tokenOut);
-    
     if (!pool) return;
     
     const price = calculatePrice(pool.reserve0, pool.reserve1, tokenIn, tokenOut);
+    
     
     await storePrice(tokenIn, tokenOut, price, timestamp);
   } catch (error) {
@@ -114,10 +112,23 @@ async function getPoolInfo(tokenA, tokenB) {
 }
 
 function calculatePrice(reserve0, reserve1, tokenIn, tokenOut) {
-  if (tokenIn < tokenOut) {
-    return reserve0.toString() / reserve1.toString();
-  } else {
-    return reserve1.toString() / reserve0.toString();
+  // Use BigNumber or similar for precision
+  const res0 = ethers.BigNumber.from(reserve0);
+  const res1 = ethers.BigNumber.from(reserve1);
+  
+  try {
+    if (tokenIn < tokenOut) {
+      return parseFloat(ethers.utils.formatUnits(
+        res0.mul(ethers.constants.WeiPerEther).div(res1)
+      ));
+    } else {
+      return parseFloat(ethers.utils.formatUnits(
+        res1.mul(ethers.constants.WeiPerEther).div(res0)
+      ));
+    }
+  } catch (error) {
+    console.error('Price calculation error:', error);
+    return 0;
   }
 }
 
@@ -233,24 +244,19 @@ async function startServer() {
               first(price, timestamp) AS open,
               max(price) AS high,
               min(price) AS low,
-              last(price, timestamp) AS close,
-              count(*)::numeric AS volume
+              last(price, timestamp) AS close
             FROM price_points
             WHERE pair = $2
               AND timestamp >= to_timestamp($3)
               AND timestamp <= to_timestamp($4)
             GROUP BY time
           )
-          SELECT 
+          SELECT
             s.time,
-            coalesce(c.open, lag(c.close) OVER (ORDER BY s.time)) AS open,
-            coalesce(c.high, lag(c.close) OVER (ORDER BY s.time)) AS high,
-            coalesce(c.low,  lag(c.close) OVER (ORDER BY s.time)) AS low,
-            coalesce(c.close, lag(c.close) OVER (ORDER BY s.time)) AS close,
-            CASE 
-              WHEN c.volume IS NULL AND c.close IS NOT NULL THEN 0.000001
-              ELSE coalesce(c.volume, 0)
-            END AS volume
+            COALESCE(c.open, (SELECT close FROM candles WHERE close IS NOT NULL ORDER BY time DESC LIMIT 1)) AS open,
+            COALESCE(c.high, (SELECT close FROM candles WHERE close IS NOT NULL ORDER BY time DESC LIMIT 1)) AS high,
+            COALESCE(c.low, (SELECT close FROM candles WHERE close IS NOT NULL ORDER BY time DESC LIMIT 1)) AS low,
+            COALESCE(c.close, (SELECT close FROM candles WHERE close IS NOT NULL ORDER BY time DESC LIMIT 1)) AS close
           FROM series s
           LEFT JOIN candles c ON s.time = c.time
           ORDER BY s.time;
@@ -274,7 +280,7 @@ async function startServer() {
           h: candles.map(c => parseFloat(c.high)),
           l: candles.map(c => parseFloat(c.low)),
           c: candles.map(c => parseFloat(c.close)),
-          v: candles.map(c => parseInt(c.volume))
+          v: candles.map(c => 0.1) // Minimal placeholder value for TradingView
         });
       } catch (error) {
         console.error('History error:', error);
