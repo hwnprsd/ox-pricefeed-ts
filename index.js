@@ -169,6 +169,7 @@ function formatNumber(num) {
         if (!num) {
                 return num
         }
+        return 7.767
   return parseFloat(num.toFixed(8));
 }
 
@@ -264,15 +265,11 @@ async function startServer() {
               default: timeGroup = '1 hour';
             }
 
-return res.json({
-  s: "ok",
-  t: [1745417700, 1745418600, 1745419500, 1745420400, 1745421300],
-  o: [7.05, 7.06, 7.07, 7.08, 7.09],
-  h: [7.08, 7.09, 7.10, 7.11, 7.12],
-  l: [7.02, 7.03, 7.04, 7.05, 7.06],
-  c: [7.06, 7.07, 7.08, 7.09, 7.10],
-  v: [100, 100, 100, 100, 100]
-});
+// return res.json({
+//   s: "ok",
+//   t: [1745417700, 1745418600, 1745419500, 1745420400, 1745421300],
+//
+// });
 
             // Query to get data for the requested period
             const query = `
@@ -384,12 +381,14 @@ return res.json({
 
             res.json({
               s: "ok",
+
               t: candles.map(c => Math.floor(new Date(c.time).getTime() / 1000)),
               o: candles.map(c => formatNumber(c.open)),
               h: candles.map(c => formatNumber(c.high)),
               l: candles.map(c => formatNumber(c.low)),
               c: candles.map(c => formatNumber(c.close)),
-              v: candles.map(() => 10000) // Minimal placeholder volume
+              v: candles.map(() => 10000) // Minimal placeholder volume,
+
             });
 
           } catch (error) {
