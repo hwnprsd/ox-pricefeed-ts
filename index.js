@@ -139,7 +139,7 @@ async function storePrice(tokenA, tokenB, price, timestamp) {
   const token1 = tokenA < tokenB ? tokenB : tokenA;
   const pairSymbol = `${token0}_${token1}`;
 
-  const finalPrice = tokenA === token0 ? price : 1 / price;
+  const finalPrice = tokenB === token0 ? price : 1 / price;
   console.log("finalPrice", finalPrice);
   
   try {
@@ -312,9 +312,9 @@ app.get('/history', async (req, res) => {
           s: "ok",
           t: timestamps,
           o: timestamps.map(() => lastKnownPrice),
-          h: timestamps.map(() => lastKnownPrice * 1.0001), // Slightly higher
+          h: timestamps.map(() => lastKnownPrice * 10.0001), // Slightly higher
           l: timestamps.map(() => lastKnownPrice * 0.9999), // Slightly lower
-          c: timestamps.map(() => lastKnownPrice * 1.00005), // Different from open
+          c: timestamps.map(() => lastKnownPrice * 10.00005), // Different from open
           v: timestamps.map(() => 10) // More substantial volume
         });
       }
