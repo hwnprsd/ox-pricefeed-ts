@@ -303,7 +303,7 @@ app.get('/history', async (req, res) => {
         candles.push({
           t: ts,
           o: Number(row.open),
-          h: Number(row.high),
+          h: Number(row.high + 0.01),
           l: Number(row.low),
           c: Number(row.close)
         });
@@ -323,7 +323,7 @@ app.get('/history', async (req, res) => {
       s: "ok",
       t: candles.map(c => c.t),
       o: candles.map(c => formatNumber(c.o)),
-      h: candles.map(c => formatNumber(c.h)),
+      h: candles.map(c => formatNumber(c.h + 0.01)),
       l: candles.map(c => formatNumber(c.l)),
       c: candles.map(c => formatNumber(c.c)),
       v: candles.map(() => 0.1)
