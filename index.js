@@ -35,6 +35,11 @@ async function setupProviders() {
     console.log('WebSocket connection closed, reconnecting...');
     await reconnectWebSocket();
   });
+
+  wsProvider._websocket.on('error', async () => {
+    console.log('WebSocket connection errored, reconnecting...');
+    await reconnectWebSocket();
+  });
 }
 
 async function reconnectWebSocket() {
@@ -215,19 +220,37 @@ async function startServer() {
         }
         
         const query = `
+          WITH series AS (
+            SELECT generate_series(
+              date_trunc('minute', to_timestamp($3))::timestamp,
+              date_trunc('minute', to_timestamp($4))::timestamp,
+              $1::interval
+            ) AS time
+          ),
+          candles AS (
+            SELECT 
+              time_bucket($1, timestamp) AS time,
+              first(price, timestamp) AS open,
+              max(price) AS high,
+              min(price) AS low,
+              last(price, timestamp) AS close,
+              count(*) AS volume
+            FROM price_points
+            WHERE pair = $2
+              AND timestamp >= to_timestamp($3)
+              AND timestamp <= to_timestamp($4)
+            GROUP BY time
+          )
           SELECT 
-            time_bucket($1, timestamp) AS time,
-            first(price, timestamp) AS open,
-            max(price) AS high,
-            min(price) AS low,
-            last(price, timestamp) AS close,
-            count(*) AS volume
-          FROM price_points
-          WHERE pair = $2
-            AND timestamp >= to_timestamp($3)
-            AND timestamp <= to_timestamp($4)
-          GROUP BY time
-          ORDER BY time
+            s.time,
+            c.open,
+            c.high,
+            c.low,
+            c.close,
+            c.volume
+          FROM series s
+          LEFT JOIN candles c ON s.time = c.time
+          ORDER BY s.time;
         `;
         
         const result = await pgPool.query(query, [timeGroup, symbol, from, to]);
