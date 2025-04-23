@@ -5,6 +5,7 @@ const { ethers } = require('ethers');
 const { Pool } = require('pg');
 const contractABI = require('./contract-abi.json');
 const { setupDatabase } = require('./db');
+const { finalization } = require('process');
 
 const app = express();
 app.use(cors());
@@ -83,6 +84,7 @@ async function processSwapEvent(event) {
     if (!pool) return;
     
     const price = calculatePrice(pool.reserve0, pool.reserve1, tokenIn, tokenOut);
+                console.log("new price", price)
     
     
     await storePrice(tokenIn, tokenOut, price, timestamp);
@@ -136,31 +138,37 @@ async function storePrice(tokenA, tokenB, price, timestamp) {
   const token0 = tokenA < tokenB ? tokenA : tokenB;
   const token1 = tokenA < tokenB ? tokenB : tokenA;
   const pairSymbol = `${token0}_${token1}`;
+
+  const finalPrice = tokenA === token0 ? price : 1 / price;
+  console.log("finalPrice", finalPrice);
   
   try {
     await pgPool.query(
       'INSERT INTO price_points(pair, price, timestamp) VALUES($1, $2, to_timestamp($3))',
-      [pairSymbol, price, timestamp]
+      [pairSymbol, finalPrice, timestamp]
     );
   } catch (error) {
     console.error('Error storing price:', error);
   }
 }
 
-async function setupEventListeners() {
-        contract.on('Swap', async (event) => {
-          const blockNumber = event.blockNumber;
-          lastProcessedBlock = blockNumber;
-          
-          await processSwapEvent(event);
-        });
+
+function setupSwapEventListener() {
+  console.log('Setting up Swap event listener...');
+  
+  // Listen for Swap events
+  contract.on('Swap', async (user, tokenIn, tokenOut, amountIn, amountOut, event) => {
+    console.log(`New Swap event detected at block ${event.blockNumber}`);
+    await processSwapEvent(event);
+    lastProcessedBlock = event.blockNumber;
+  });
 }
 
 async function startServer() {
   try {
     await setupDatabase(pgPool);
     await setupProviders();
-    setupEventListeners();
+    setupSwapEventListener()
     
     app.get('/config', (req, res) => {
       res.json({
